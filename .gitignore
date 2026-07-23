@@ -1,0 +1,16 @@
+# colcon build artifacts
+go2_ws/build/
+go2_ws/install/
+go2_ws/log/
+
+# ROS logs
+**/log/
+
+# Python
+__pycache__/
+*.pyc
+
+# Editor/OS
+.vscode/
+*.swp
+.DS_Store
