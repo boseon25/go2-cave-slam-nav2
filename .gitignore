@@ -10,6 +10,9 @@ go2_ws/log/
 __pycache__/
 *.pyc
 
+# YOLO weights (auto-downloaded by ultralytics on first run)
+*.pt
+
 # Editor/OS
 .vscode/
 *.swp

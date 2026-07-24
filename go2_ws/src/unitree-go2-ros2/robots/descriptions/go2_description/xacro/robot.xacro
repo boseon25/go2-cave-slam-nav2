@@ -10,6 +10,7 @@
     <!-- <xacro:include filename="$(find go2_description)/xacro/stairs.xacro"/> -->
     <xacro:include filename="$(find go2_description)/xacro/gazebo.xacro"/>
     <xacro:include filename="$(find go2_description)/xacro/laser.xacro"/>
+    <xacro:include filename="$(find go2_description)/xacro/lidar3d.xacro"/>
     <xacro:include filename="$(find champ_description)/urdf/asus_camera.urdf.xacro"/>
     <!-- <xacro:include filename="$(find go2_gazebo)/launch/stairs.urdf.xacro"/> -->
 
