@@ -38,7 +38,7 @@ def generate_launch_description():
     # Defaults to this capstone's cave world, assuming the standard
     # ~/capstone2/{gazebo_cave_world, go2_ws} clone layout from the README.
     default_world_path = os.path.expanduser(
-        "~/capstone2/gazebo_cave_world/worlds/cave_world.world"
+        "~/capstone2/gazebo_cave_world/worlds/cave_world_custom.world"
     )
     cave_models_path = os.path.expanduser(
         "~/capstone2/gazebo_cave_world/worlds/models"
