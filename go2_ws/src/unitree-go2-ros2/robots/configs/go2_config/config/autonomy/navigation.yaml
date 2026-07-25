@@ -225,21 +225,21 @@ local_costmap:
         z_voxels: 16
         mark_threshold: 1
         observation_sources: realsense lidar3d
-        min_obstacle_height: 0.00
-        max_obstacle_height: 2.0 
+        min_obstacle_height: 0.08
+        max_obstacle_height: 2.0
         realsense:
           topic: /camera/points
           raytrace_min_range: 0.5
-          min_obstacle_height: 0.0
-          max_obstacle_height: 2.0 
+          min_obstacle_height: 0.08
+          max_obstacle_height: 2.0
           clearing: True
           marking: True
           data_type: "PointCloud2"
         lidar3d:
           topic: /lidar3d/points
           raytrace_min_range: 0.3
-          min_obstacle_height: 0.0
-          max_obstacle_height: 2.0 
+          min_obstacle_height: 0.08
+          max_obstacle_height: 2.0
           clearing: True
           marking: True
           data_type: "PointCloud2"
@@ -294,21 +294,21 @@ global_costmap:
         z_voxels: 16
         mark_threshold: 1
         observation_sources: realsense lidar3d
-        min_obstacle_height: 0.00
-        max_obstacle_height: 2.0 
+        min_obstacle_height: 0.08
+        max_obstacle_height: 2.0
         realsense:
           topic: /camera/points
           raytrace_min_range: 0.5
-          min_obstacle_height: 0.0
-          max_obstacle_height: 2.0 
+          min_obstacle_height: 0.08
+          max_obstacle_height: 2.0
           clearing: True
           marking: True
           data_type: "PointCloud2"
         lidar3d:
           topic: /lidar3d/points
           raytrace_min_range: 0.3
-          min_obstacle_height: 0.0
-          max_obstacle_height: 2.0 
+          min_obstacle_height: 0.08
+          max_obstacle_height: 2.0
           clearing: True
           marking: True
           data_type: "PointCloud2"
