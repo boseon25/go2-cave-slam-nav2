@@ -15,10 +15,13 @@ from typing import Optional, Tuple
 import cv2
 import numpy as np
 import rclpy
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import PointStamped, Twist
+from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import Image
+from rclpy.time import Time
+from sensor_msgs.msg import CameraInfo, Image
+from tf2_ros import Buffer, TransformException, TransformListener
 from ultralytics import YOLO
 
 
@@ -29,6 +32,20 @@ from ultralytics import YOLO
 # RGB 및 Depth 토픽 (capstone2 go2_config의 asus_camera 실제 토픽명)
 IMAGE_TOPIC = "/camera/image_raw"
 DEPTH_TOPIC = "/camera/depth/image_raw"
+CAMERA_INFO_TOPIC = "/camera/depth/camera_info"
+
+# 로봇의 Gazebo Ground Truth 위치 (champ_base/scripts/ground_truth_odom_bridge.py가
+# 구독하는 것과 같은, CHAMP 다리-운동학 오도메트리를 우회하는 원본 토픽)
+GROUND_TRUTH_ODOM_TOPIC = "/odom/ground_truth"
+
+# 계산된 조난자 좌표 발행 토픽
+SURVIVOR_POSITION_TOPIC = "/survivor_position"
+
+# 좌표계 이름 (이 프로젝트는 map == odom == Gazebo world 좌표계이므로 map을 쓴다.
+# 자세한 이유는 view_map.launch.py 주석 참고)
+WORLD_FRAME = "map"
+BASE_FRAME = "base_link"
+DEFAULT_CAMERA_FRAME = "camera_depth_optical_frame"
 
 # Go2 이동 명령 토픽
 CMD_VEL_TOPIC = "/cmd_vel"
@@ -100,6 +117,20 @@ class YoloSurvivorDetector(Node):
         # 가장 최근에 수신한 Depth 영상
         self.latest_depth_image: Optional[np.ndarray] = None
 
+        # Depth 카메라 내부 파라미터
+        self.camera_fx: Optional[float] = None
+        self.camera_fy: Optional[float] = None
+        self.camera_cx: Optional[float] = None
+        self.camera_cy: Optional[float] = None
+        self.camera_frame_id = DEFAULT_CAMERA_FRAME
+
+        # 로봇의 최신 world(=map) 기준 위치와 자세
+        self.latest_ground_truth: Optional[Odometry] = None
+
+        # base_link와 카메라 optical frame 사이 TF 조회
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+
         # RGB 영상 구독
         self.image_subscriber = self.create_subscription(
             Image,
@@ -116,10 +147,33 @@ class YoloSurvivorDetector(Node):
             qos_profile_sensor_data,
         )
 
+        # Depth 카메라 내부 파라미터 구독
+        self.camera_info_subscriber = self.create_subscription(
+            CameraInfo,
+            CAMERA_INFO_TOPIC,
+            self.camera_info_callback,
+            10,
+        )
+
+        # 로봇의 world(=map) 기준 위치와 자세 구독
+        self.ground_truth_subscriber = self.create_subscription(
+            Odometry,
+            GROUND_TRUTH_ODOM_TOPIC,
+            self.ground_truth_callback,
+            10,
+        )
+
         # 정지 명령 발행
         self.cmd_vel_publisher = self.create_publisher(
             Twist,
             CMD_VEL_TOPIC,
+            10,
+        )
+
+        # 계산된 조난자의 world(=map) 좌표 발행
+        self.survivor_position_publisher = self.create_publisher(
+            PointStamped,
+            SURVIVOR_POSITION_TOPIC,
             10,
         )
 
@@ -147,6 +201,35 @@ class YoloSurvivorDetector(Node):
             "Go2를 정지합니다."
         )
 
+    def camera_info_callback(self, msg: CameraInfo):
+        """Depth 카메라 내부 파라미터를 저장한다."""
+
+        if len(msg.k) < 9:
+            return
+
+        first_time = self.camera_fx is None
+
+        self.camera_fx = float(msg.k[0])
+        self.camera_fy = float(msg.k[4])
+        self.camera_cx = float(msg.k[2])
+        self.camera_cy = float(msg.k[5])
+
+        if msg.header.frame_id:
+            self.camera_frame_id = msg.header.frame_id
+
+        if first_time:
+            self.get_logger().info(
+                "Depth CameraInfo 수신: "
+                f"frame={self.camera_frame_id}, "
+                f"fx={self.camera_fx:.3f}, fy={self.camera_fy:.3f}, "
+                f"cx={self.camera_cx:.3f}, cy={self.camera_cy:.3f}"
+            )
+
+    def ground_truth_callback(self, msg: Odometry):
+        """로봇의 최신 world(=map) 기준 위치와 자세를 저장한다."""
+
+        self.latest_ground_truth = msg
+
     def depth_callback(self, msg: Image):
         """32FC1 Depth 영상을 NumPy 배열로 저장한다.
 
@@ -166,15 +249,151 @@ class YoloSurvivorDetector(Node):
                 f"Depth 영상을 변환하지 못했습니다: {error}"
             )
 
-    def estimate_distance_m(
+    @staticmethod
+    def quaternion_rotation_matrix(
+        x: float,
+        y: float,
+        z: float,
+        w: float,
+    ) -> np.ndarray:
+        """Quaternion을 3x3 회전행렬로 변환한다."""
+
+        norm = np.sqrt(x * x + y * y + z * z + w * w)
+
+        if norm < 1.0e-12:
+            return np.eye(3, dtype=np.float64)
+
+        x /= norm
+        y /= norm
+        z /= norm
+        w /= norm
+
+        return np.array(
+            [
+                [
+                    1.0 - 2.0 * (y * y + z * z),
+                    2.0 * (x * y - z * w),
+                    2.0 * (x * z + y * w),
+                ],
+                [
+                    2.0 * (x * y + z * w),
+                    1.0 - 2.0 * (x * x + z * z),
+                    2.0 * (y * z - x * w),
+                ],
+                [
+                    2.0 * (x * z - y * w),
+                    2.0 * (y * z + x * w),
+                    1.0 - 2.0 * (x * x + y * y),
+                ],
+            ],
+            dtype=np.float64,
+        )
+
+    def get_robot_world_position(
+        self,
+    ) -> Optional[Tuple[float, float, float]]:
+        """로봇 base_link의 world(=map) 좌표를 반환한다."""
+
+        if self.latest_ground_truth is None:
+            return None
+
+        position = self.latest_ground_truth.pose.pose.position
+        return (float(position.x), float(position.y), float(position.z))
+
+    def calculate_survivor_world_position(
+        self,
+        pixel_u: int,
+        pixel_v: int,
+        depth_m: float,
+    ) -> Optional[Tuple[float, float, float]]:
+        """
+        조난자의 Depth 픽셀을 카메라 3차원 좌표로 변환하고,
+        다시 base_link와 world(=map) 좌표로 변환한다.
+        """
+
+        if (
+            self.camera_fx is None
+            or self.camera_fy is None
+            or self.camera_cx is None
+            or self.camera_cy is None
+            or self.latest_ground_truth is None
+        ):
+            return None
+
+        if depth_m <= 0.0 or not np.isfinite(depth_m):
+            return None
+
+        # Depth optical frame 좌표계: X=화면 오른쪽, Y=화면 아래, Z=카메라 정면
+        camera_x = (float(pixel_u) - self.camera_cx) * depth_m / self.camera_fx
+        camera_y = (float(pixel_v) - self.camera_cy) * depth_m / self.camera_fy
+        camera_z = depth_m
+
+        point_camera = np.array([camera_x, camera_y, camera_z], dtype=np.float64)
+
+        try:
+            # 카메라 optical frame의 점을 base_link 기준으로 변환 (고정 TF)
+            camera_to_base = self.tf_buffer.lookup_transform(
+                BASE_FRAME,
+                self.camera_frame_id,
+                Time(),
+            )
+
+        except TransformException as error:
+            self.get_logger().debug(
+                f"카메라 TF를 조회하지 못했습니다: {error}"
+            )
+            return None
+
+        translation = camera_to_base.transform.translation
+        rotation = camera_to_base.transform.rotation
+
+        camera_to_base_rotation = self.quaternion_rotation_matrix(
+            rotation.x, rotation.y, rotation.z, rotation.w,
+        )
+
+        point_base = camera_to_base_rotation @ point_camera + np.array(
+            [translation.x, translation.y, translation.z], dtype=np.float64,
+        )
+
+        # /odom/ground_truth의 pose가 이미 world(=map) 기준 base_link 자세다.
+        robot_pose = self.latest_ground_truth.pose.pose
+        robot_position = robot_pose.position
+        robot_orientation = robot_pose.orientation
+
+        base_to_world_rotation = self.quaternion_rotation_matrix(
+            robot_orientation.x,
+            robot_orientation.y,
+            robot_orientation.z,
+            robot_orientation.w,
+        )
+
+        point_world = base_to_world_rotation @ point_base + np.array(
+            [robot_position.x, robot_position.y, robot_position.z],
+            dtype=np.float64,
+        )
+
+        return (float(point_world[0]), float(point_world[1]), float(point_world[2]))
+
+    def publish_survivor_position(self, position: Tuple[float, float, float]):
+        """조난자의 world(=map) 좌표를 PointStamped로 발행한다."""
+
+        message = PointStamped()
+        message.header.stamp = self.get_clock().now().to_msg()
+        message.header.frame_id = WORLD_FRAME
+        message.point.x, message.point.y, message.point.z = position
+
+        self.survivor_position_publisher.publish(message)
+
+    def estimate_depth_measurement(
         self,
         bbox: Tuple[float, float, float, float],
         rgb_shape,
-    ) -> Optional[float]:
+    ) -> Optional[Tuple[float, int, int]]:
         """
-        사람 바운딩 박스 중심 영역의 Depth 중앙값을 계산한다.
+        사람 바운딩 박스 중심 영역의 Depth 중앙값과
+        Depth 영상 기준 중심 픽셀 좌표를 반환한다.
 
-        RGB 영상과 Depth 영상의 해상도가 다를 경우 좌표를 비례 변환한다.
+        반환값: (distance_m, center_x, center_y)
         """
 
         if self.latest_depth_image is None:
@@ -212,14 +431,8 @@ class YoloSurvivorDetector(Node):
         center_x = (x1 + x2) // 2
         center_y = (y1 + y2) // 2
 
-        roi_width = max(
-            4,
-            int(box_width * DEPTH_ROI_RATIO),
-        )
-        roi_height = max(
-            4,
-            int(box_height * DEPTH_ROI_RATIO),
-        )
+        roi_width = max(4, int(box_width * DEPTH_ROI_RATIO))
+        roi_height = max(4, int(box_height * DEPTH_ROI_RATIO))
 
         roi_x1 = max(0, center_x - roi_width // 2)
         roi_x2 = min(depth_width, center_x + roi_width // 2)
@@ -227,10 +440,7 @@ class YoloSurvivorDetector(Node):
         roi_y1 = max(0, center_y - roi_height // 2)
         roi_y2 = min(depth_height, center_y + roi_height // 2)
 
-        depth_roi = depth_image[
-            roi_y1:roi_y2,
-            roi_x1:roi_x2,
-        ]
+        depth_roi = depth_image[roi_y1:roi_y2, roi_x1:roi_x2]
 
         if depth_roi.size == 0:
             return None
@@ -246,7 +456,7 @@ class YoloSurvivorDetector(Node):
         if valid_depth_values.size < MIN_VALID_DEPTH_PIXELS:
             return None
 
-        return float(np.median(valid_depth_values))
+        return float(np.median(valid_depth_values)), center_x, center_y
 
     def image_callback(self, msg: Image):
         current_time = time.monotonic()
@@ -319,16 +529,28 @@ class YoloSurvivorDetector(Node):
                     for value in coordinates
                 ]
 
-                distance_m = self.estimate_distance_m(
+                depth_measurement = self.estimate_depth_measurement(
                     bbox=(x1, y1, x2, y2),
                     rgb_shape=frame.shape,
                 )
+
+                if depth_measurement is None:
+                    distance_m = None
+                    survivor_world_position = None
+                else:
+                    distance_m, depth_pixel_u, depth_pixel_v = depth_measurement
+                    survivor_world_position = self.calculate_survivor_world_position(
+                        pixel_u=depth_pixel_u,
+                        pixel_v=depth_pixel_v,
+                        depth_m=distance_m,
+                    )
 
                 detections.append(
                     {
                         "bbox": (x1, y1, x2, y2),
                         "confidence": confidence,
                         "distance_m": distance_m,
+                        "world_position": survivor_world_position,
                     }
                 )
 
@@ -340,15 +562,27 @@ class YoloSurvivorDetector(Node):
         person_count = len(detections)
         person_found = person_count > 0
 
-        valid_distances = [
-            detection["distance_m"]
+        valid_detections = [
+            detection
             for detection in detections
             if detection["distance_m"] is not None
         ]
 
+        closest_detection = (
+            min(valid_detections, key=lambda detection: detection["distance_m"])
+            if valid_detections
+            else None
+        )
+
         closest_distance_m = (
-            min(valid_distances)
-            if valid_distances
+            closest_detection["distance_m"]
+            if closest_detection is not None
+            else None
+        )
+
+        closest_survivor_world_position = (
+            closest_detection["world_position"]
+            if closest_detection is not None
             else None
         )
 
@@ -368,12 +602,31 @@ class YoloSurvivorDetector(Node):
             self.last_distance_log_time = current_time
 
             if closest_distance_m is not None:
+                robot_world_position = self.get_robot_world_position()
+                coordinate_text = ""
+
+                if (
+                    robot_world_position is not None
+                    and closest_survivor_world_position is not None
+                ):
+                    coordinate_text = (
+                        ", 로봇 좌표=("
+                        f"{robot_world_position[0]:.2f}, "
+                        f"{robot_world_position[1]:.2f}, "
+                        f"{robot_world_position[2]:.2f}), "
+                        "조난자 좌표=("
+                        f"{closest_survivor_world_position[0]:.2f}, "
+                        f"{closest_survivor_world_position[1]:.2f}, "
+                        f"{closest_survivor_world_position[2]:.2f})"
+                    )
+
                 self.get_logger().info(
                     "조난자 탐지 중: "
                     f"인원={person_count}, "
                     f"가장 가까운 거리={closest_distance_m:.2f} m, "
                     f"연속 탐지={self.detect_streak}/"
                     f"{DETECT_CONFIRM_FRAMES}"
+                    f"{coordinate_text}"
                 )
             else:
                 self.get_logger().info(
@@ -383,6 +636,13 @@ class YoloSurvivorDetector(Node):
                     f"연속 탐지={self.detect_streak}/"
                     f"{DETECT_CONFIRM_FRAMES}"
                 )
+
+        # 연속 탐지 조건을 만족한 조난자의 world(=map) 좌표 발행
+        if (
+            self.detect_streak >= DETECT_CONFIRM_FRAMES
+            and closest_survivor_world_position is not None
+        ):
+            self.publish_survivor_position(closest_survivor_world_position)
 
         if (
             not self.stop_active

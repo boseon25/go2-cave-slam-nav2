@@ -128,6 +128,23 @@ ros2 launch go2_config view_map.launch.py
 - 실행하면 별도의 **"Go2 Survivor Detection"** 창에 바운딩박스·신뢰도·추정 거리가 표시됩니다 (rqt_image_view는 원본 영상만 보여줄 뿐 판단은 하지 않습니다 — 판단 결과는 이 창에서 확인).
 - YOLO 모델(`yolo11n.pt`)은 최초 실행 시 자동 다운로드됩니다.
 
+#### 조난자 좌표(map 기준) 확인하기
+
+3프레임 연속 탐지되면 카메라 픽셀+depth를 카메라 intrinsic과 TF(`base_link` ↔ 카메라 optical frame),
+그리고 `/odom/ground_truth`(로봇의 map 기준 실제 위치)를 이용해 조난자의 **map 좌표계 3D 좌표**를 계산합니다.
+
+- **터미널 4 화면 자체**에 약 1초마다 로그로 바로 찍힙니다 (별도 설정 필요 없음):
+  ```
+  [INFO] [yolo_survivor_detector]: 조난자 탐지 중: 인원=1, 가장 가까운 거리=1.28 m, 연속 탐지=64/3, 로봇 좌표=(5.91, 3.87, 0.22), 조난자 좌표=(5.46, 5.51, 0.30)
+  ```
+- 로그 텍스트 말고 좌표값만 순수하게 보고 싶다면, **터미널 5**를 새로 열어서:
+  ```bash
+  source /opt/ros/humble/setup.bash
+  ros2 topic echo /survivor_position
+  ```
+  를 실행하면 `geometry_msgs/PointStamped`(`header.frame_id: map`, `point.x/y/z`)로 실시간 발행됩니다.
+- 비전 기반 추정이라 실제 조난자 모형(rescue_randy)의 중심점과는 보통 수십 cm ~ 1m 정도 오차가 있을 수 있습니다 (모형이 눕거나 기댄 자세일 때 특히 그렇습니다).
+
 ## 3. 프로세스 다 껐다가 다시 이어보고 싶을 때
 
 Gazebo/RViz 창만 닫았다면 (`gzserver`, SLAM, Nav2 노드는 백그라운드에서 계속 실행 중) 창만 다시 붙이면 됩니다:
