@@ -1,11 +1,16 @@
 amcl:
   ros__parameters:
     use_sim_time: True
-    alpha1: 0.2
-    alpha2: 0.2
-    alpha3: 0.2
-    alpha4: 0.2
-    alpha5: 0.2
+    # odom은 실제로는 champ_base/scripts/ground_truth_odom_bridge.py가 Gazebo
+    # ground truth를 그대로 퍼블리시한 것이라 실제 로봇 오도메트리보다 훨씬
+    # 정확하다. alpha1~5(오도메트리 노이즈 모델)를 기본값보다 훨씬 낮춰서
+    # AMCL이 odom을 강하게 신뢰하게 하면, 저장된 맵의 미확인(unknown) 구간처럼
+    # 스캔 매칭이 약한 곳에서도 실제 위치에서 크게 드리프트하지 않는다.
+    alpha1: 0.02
+    alpha2: 0.02
+    alpha3: 0.02
+    alpha4: 0.02
+    alpha5: 0.02
     base_frame_id: "base_link"
     beam_skip_distance: 0.5
     beam_skip_error_threshold: 0.9
