@@ -8,7 +8,32 @@ Unitree Go2(사족보행 로봇)를 Gazebo Classic(ROS 2 Humble) 위에서 시�
 - **로봇**: Unitree Go2 (다리 제어: [CHAMP](https://github.com/chvmp/champ) 프레임워크, [anujjain-dev/unitree-go2-ros2](https://github.com/anujjain-dev/unitree-go2-ros2) 기반)
 - **SLAM**: slam_toolbox (online async)
 - **자율주행**: Nav2
-- **센서**: 2D LiDAR(front_laser) + RGB-D 카메라(camera)
+- **센서**: 2D LiDAR(front_laser) + 3D LiDAR(lidar3d) + RGB-D 카메라(camera)
+- **비전**: YOLO 기반 조난자(사람) 탐지 + map 좌표 계산
+
+## 폴더 구조
+
+```
+capstone2/
+├── README.md                    # 이 문서 (실행 방법)
+├── PROJECT_SUMMARY.md           # 폴더 구조/구성 요소/개발 히스토리 요약
+├── gazebo_cave_world/           # 동굴 맵 (LTU-RAI 오픈소스)
+│   └── worlds/cave_world_custom.world   # 실제 사용하는 커스텀 동굴 월드
+└── go2_ws/                      # ROS 2 colcon 워크스페이스
+    └── src/
+        ├── unitree-go2-ros2/
+        │   ├── champ/                       # CHAMP 사족보행 제어 프레임워크
+        │   └── robots/
+        │       ├── descriptions/go2_description/   # Go2 URDF/xacro, 센서 정의
+        │       └── configs/go2_config/             # 이 프로젝트의 메인 패키지
+        │           ├── launch/       # gazebo/slam/view_map/navigate 등 launch 파일
+        │           ├── config/       # gait, ros_control, Nav2/SLAM 파라미터
+        │           ├── maps/         # 저장된 동굴 지도 (cave_world_map.pgm/.yaml)
+        │           └── scripts/      # yolo_survivor_detector.py 등
+        └── m-explore-ros2/           # frontier exploration (아직 실사용 불가)
+```
+
+각 파일의 역할과 개발 히스토리는 [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md)에 더 자세히 정리되어 있습니다.
 
 ## 사전 준비물
 
