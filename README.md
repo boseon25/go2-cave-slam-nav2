@@ -21,7 +21,6 @@ Unitree Go2(사족보행 로봇)를 Gazebo Classic(ROS 2 Humble) 위에서 시�
 ```
 capstone2/
 ├── README.md                    # 이 문서 (실행 방법)
-├── PROJECT_SUMMARY.md           # 폴더 구조/구성 요소/개발 히스토리 요약
 ├── gazebo_cave_world/           # 동굴 맵 (LTU-RAI 오픈소스)
 │   └── worlds/cave_world_custom.world   # 실제 사용하는 커스텀 동굴 월드
 └── go2_ws/                      # ROS 2 colcon 워크스페이스
@@ -37,8 +36,6 @@ capstone2/
         │           └── scripts/      # yolo_survivor_detector.py 등
         └── m-explore-ros2/           # frontier exploration (아직 실사용 불가)
 ```
-
-각 파일의 역할과 개발 히스토리는 [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md)에 더 자세히 정리되어 있습니다.
 
 ## 사전 준비물
 
