@@ -4,6 +4,11 @@ Unitree Go2(사족보행 로봇)를 Gazebo Classic(ROS 2 Humble) 위에서 시�
 동굴(DARPA SubT 스타일) 환경에서 SLAM으로 지도를 작성하고 Nav2로 자율주행하며,
 카메라로 조난자·위험물을 탐지하는 프로젝트입니다.
 
+|시연1 — 동굴 탐사 주행|시연2 — 조난자(사람) 탐지|
+|---|---|
+|![시연1](demo/thumbnail1.jpg)|![시연2](demo/thumbnail2.jpg)|
+|▶ [demo1.webm](demo/demo1.webm)|▶ [demo2.webm](demo/demo2.webm)|
+
 - **맵**: [LTU-RAI/gazebo_cave_world](https://github.com/LTU-RAI/gazebo_cave_world)
 - **로봇**: Unitree Go2 (다리 제어: [CHAMP](https://github.com/chvmp/champ) 프레임워크, [anujjain-dev/unitree-go2-ros2](https://github.com/anujjain-dev/unitree-go2-ros2) 기반)
 - **SLAM**: slam_toolbox (online async)
